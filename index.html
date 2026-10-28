@@ -1,0 +1,524 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Footy Goal Songs</title>
+
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 30px;
+    font-family: Arial, sans-serif;
+    background: #101010;
+    color: white;
+    text-align: center;
+  }
+
+  h1 {
+    font-size: clamp(30px, 5vw, 52px);
+    margin: 0 0 8px;
+  }
+
+  .subtitle {
+    color: #aaa;
+    margin-bottom: 24px;
+  }
+
+  .top-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 25px;
+  }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 20px;
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .spotify-button {
+    background: #1ed760;
+    color: #111;
+  }
+
+  .stop-button {
+    background: #e32636;
+    color: white;
+    font-size: 22px;
+    padding: 18px 34px;
+  }
+
+  #status {
+    color: #ccc;
+    min-height: 24px;
+    margin: 18px 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 18px;
+    max-width: 1100px;
+    margin: 25px auto;
+  }
+
+  .player-card {
+    background: #202020;
+    border: 1px solid #383838;
+    border-radius: 18px;
+    padding: 22px;
+  }
+
+  .player-card h2 {
+    margin-top: 0;
+    font-size: 26px;
+  }
+
+  .goal-button {
+    width: 100%;
+    min-height: 105px;
+    background: #1ed760;
+    color: #101010;
+    font-size: 27px;
+    margin: 8px 0 18px;
+  }
+
+  .goal-button:active {
+    transform: scale(0.98);
+  }
+
+  label {
+    display: block;
+    text-align: left;
+    font-size: 13px;
+    color: #bbb;
+    margin: 12px 0 5px;
+  }
+
+  input {
+    width: 100%;
+    padding: 11px;
+    border-radius: 7px;
+    border: 1px solid #555;
+    background: #111;
+    color: white;
+    font-size: 14px;
+  }
+
+  .small {
+    color: #999;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .save-button {
+    width: 100%;
+    background: #383838;
+    color: white;
+    margin-top: 12px;
+  }
+
+  .instructions {
+    max-width: 760px;
+    margin: 30px auto;
+    padding: 20px;
+    background: #202020;
+    border-radius: 14px;
+    text-align: left;
+    line-height: 1.6;
+  }
+
+  a { color: #1ed760; }
+</style>
+</head>
+
+<body>
+  <h1>🏉 FOOTY GOAL SONGS</h1>
+  <div class="subtitle">Press a player's button when they kick a goal!</div>
+
+  <div class="top-buttons">
+    <button class="spotify-button" onclick="loginSpotify()">
+      CONNECT SPOTIFY
+    </button>
+    <button class="stop-button" onclick="stopAll()">
+      ■ STOP ALL
+    </button>
+  </div>
+
+  <div id="status">Connect Spotify to get started.</div>
+
+  <div class="grid" id="playerGrid"></div>
+
+  <div class="instructions">
+    <h3>Setup instructions</h3>
+    <ol>
+      <li>Make a Spotify developer app at
+        <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a>.
+      </li>
+      <li>Copy your app's Client ID into the code where it says
+        <code>"61b083da04654047af21744414f14291"</code>.
+      </li>
+      <li>In your Spotify app settings, add this exact Redirect URI:
+        <code>http://127.0.0.1:8000/</code>
+      </li>
+      <li>Save this file as <code>index.html</code> and run it through the local server described below.</li>
+      <li>Press Connect Spotify and sign in. Spotify Premium is required for playback through the Web Playback SDK.</li>
+      <li>Enter each player's Spotify track URI and start time in seconds, then press Save.</li>
+    </ol>
+    <p class="small">
+      Track URI example: spotify:track:4uLU6hMCjMI75M1A2tKUQC.
+      Use the actual URI of the song you want.
+      This is a prototype; check Spotify's current developer terms before using it publicly at a football ground.
+    </p>
+  </div>
+
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+<script>
+const CLIENT_ID = "61b083da04654047af21744414f14291";
+const REDIRECT_URI = "http://127.0.0.1:8000/";
+const CLIP_SECONDS = 20;
+
+const defaultPlayers = [
+  { name: "Bailey", uri: "", start: 0 },
+  { name: "Ben", uri: "", start: 0 },
+  { name: "Marly", uri: "", start: 0 }
+];
+
+let players = loadPlayers();
+let accessToken = null;
+let tokenExpiry = 0;
+let spotifyPlayer = null;
+let deviceId = null;
+let stopTimer = null;
+let isReady = false;
+
+function loadPlayers() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("footyGoalPlayers"));
+    if (Array.isArray(saved) && saved.length === 3) return saved;
+  } catch (e) {}
+  return defaultPlayers.map(p => ({ ...p }));
+}
+
+function setStatus(message) {
+  document.getElementById("status").textContent = message;
+}
+
+function renderPlayers() {
+  const grid = document.getElementById("playerGrid");
+  grid.innerHTML = "";
+
+  players.forEach((player, index) => {
+    const card = document.createElement("div");
+    card.className = "player-card";
+
+    const heading = document.createElement("h2");
+    heading.textContent = player.name;
+
+    const playButton = document.createElement("button");
+    playButton.className = "goal-button";
+    playButton.textContent = "⚽ GOAL!";
+    playButton.addEventListener("click", () => playGoalSong(index));
+
+    const uriLabel = document.createElement("label");
+    uriLabel.textContent = "Spotify track URI";
+
+    const uriInput = document.createElement("input");
+    uriInput.type = "text";
+    uriInput.placeholder = "spotify:track:...";
+    uriInput.value = player.uri || "";
+    uriInput.id = "uri-" + index;
+
+    const startLabel = document.createElement("label");
+    startLabel.textContent = "Start time (seconds)";
+
+    const startInput = document.createElement("input");
+    startInput.type = "number";
+    startInput.min = "0";
+    startInput.step = "1";
+    startInput.value = player.start || 0;
+    startInput.id = "start-" + index;
+
+    const saveButton = document.createElement("button");
+    saveButton.className = "save-button";
+    saveButton.textContent = "SAVE SONG";
+    saveButton.addEventListener("click", () => savePlayer(index));
+
+    const note = document.createElement("div");
+    note.className = "small";
+    note.textContent = "Plays for " + CLIP_SECONDS + " seconds";
+
+    card.append(
+      heading, playButton, uriLabel, uriInput,
+      startLabel, startInput, saveButton, note
+    );
+    grid.appendChild(card);
+  });
+}
+
+function savePlayer(index) {
+  const uri = document.getElementById("uri-" + index).value.trim();
+  const start = Number(document.getElementById("start-" + index).value);
+
+  if (uri && !/^spotify:track:[A-Za-z0-9]+$/.test(uri)) {
+    setStatus("Please enter a track URI like spotify:track:TRACK_ID.");
+    return;
+  }
+
+  if (!Number.isFinite(start) || start < 0) {
+    setStatus("Start time must be zero or greater.");
+    return;
+  }
+
+  players[index].uri = uri;
+  players[index].start = start;
+  localStorage.setItem("footyGoalPlayers", JSON.stringify(players));
+  setStatus(players[index].name + "'s song saved.");
+}
+
+function randomString(length) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, b => chars[b % chars.length]).join("");
+}
+
+async function sha256Base64Url(value) {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const bytes = Array.from(new Uint8Array(digest));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function loginSpotify() {
+  if (CLIENT_ID === "YOUR_SPOTIFY_CLIENT_ID") {
+    setStatus("First add your Spotify Client ID to the code.");
+    return;
+  }
+
+  const verifier = randomString(64);
+  const challenge = await sha256Base64Url(verifier);
+  const state = randomString(16);
+
+  sessionStorage.setItem("spotifyVerifier", verifier);
+  sessionStorage.setItem("spotifyState", state);
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    scope: [
+      "streaming",
+      "user-read-email",
+      "user-read-private",
+      "user-modify-playback-state",
+      "user-read-playback-state"
+    ].join(" "),
+    redirect_uri: REDIRECT_URI,
+    state,
+    code_challenge_method: "S256",
+    code_challenge: challenge
+  });
+
+  location.href = "https://accounts.spotify.com/authorize?" + params.toString();
+}
+
+async function exchangeAuthorizationCode() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code");
+  if (!code) return;
+
+  const state = params.get("state");
+  if (state !== sessionStorage.getItem("spotifyState")) {
+    setStatus("Spotify login state check failed. Please connect again.");
+    return;
+  }
+
+  const verifier = sessionStorage.getItem("spotifyVerifier");
+  if (!verifier) {
+    setStatus("Login details expired. Please connect Spotify again.");
+    return;
+  }
+
+  try {
+    const response = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: CLIENT_ID,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier: verifier
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error_description || data.error);
+
+    accessToken = data.access_token;
+    tokenExpiry = Date.now() + data.expires_in * 1000;
+    sessionStorage.removeItem("spotifyVerifier");
+    sessionStorage.removeItem("spotifyState");
+
+    history.replaceState({}, document.title, REDIRECT_URI);
+    startSpotifyPlayer();
+  } catch (error) {
+    setStatus("Spotify login failed: " + error.message);
+  }
+}
+
+window.onSpotifyWebPlaybackSDKReady = function() {
+  // The SDK is ready to be created after login.
+  if (accessToken) startSpotifyPlayer();
+};
+
+function startSpotifyPlayer() {
+  if (!accessToken || spotifyPlayer) return;
+
+  spotifyPlayer = new Spotify.Player({
+    name: "Footy Goal Songs",
+    getOAuthToken: callback => {
+      if (accessToken && Date.now() < tokenExpiry - 30000) {
+        callback(accessToken);
+      } else {
+        setStatus("Spotify login expired. Please connect again.");
+      }
+    },
+    volume: 0.8
+  });
+
+  spotifyPlayer.addListener("ready", async ({ device_id }) => {
+    deviceId = device_id;
+    isReady = true;
+
+    try {
+      await spotifyRequest("/v1/me/player", "PUT", {
+        device_ids: [deviceId],
+        play: false
+      });
+      setStatus("Spotify connected. Ready to play goal songs!");
+    } catch (error) {
+      setStatus("Player ready. If playback fails, try Connect Spotify again.");
+    }
+  });
+
+  spotifyPlayer.addListener("not_ready", () => {
+    isReady = false;
+    setStatus("Spotify player disconnected.");
+  });
+
+  spotifyPlayer.addListener("initialization_error", ({ message }) => {
+    setStatus("Spotify setup error: " + message);
+  });
+
+  spotifyPlayer.addListener("authentication_error", ({ message }) => {
+    setStatus("Spotify authentication error: " + message);
+  });
+
+  spotifyPlayer.addListener("account_error", ({ message }) => {
+    setStatus("Spotify account error: " + message);
+  });
+
+  spotifyPlayer.connect();
+}
+
+async function spotifyRequest(path, method, body) {
+  if (!accessToken || Date.now() >= tokenExpiry) {
+    throw new Error("Spotify login has expired. Please connect again.");
+  }
+
+  const response = await fetch("https://api.spotify.com" + path, {
+    method,
+    headers: {
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error("Spotify API error (" + response.status + "): " + detail);
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+async function playGoalSong(index) {
+  const player = players[index];
+
+  if (!player.uri) {
+    setStatus("Add and save a Spotify track URI for " + player.name + " first.");
+    return;
+  }
+
+  if (!accessToken) {
+    setStatus("Please connect Spotify first.");
+    return;
+  }
+
+  if (!isReady || !deviceId) {
+    setStatus("Spotify is still getting ready. Try again in a moment.");
+    return;
+  }
+
+  clearTimeout(stopTimer);
+
+  try {
+    await spotifyRequest(
+      "/v1/me/player/play?device_id=" + encodeURIComponent(deviceId),
+      "PUT",
+      {
+        uris: [player.uri],
+        position_ms: Math.round(Number(player.start || 0) * 1000)
+      }
+    );
+
+    setStatus("Playing " + player.name + "'s goal song!");
+
+    stopTimer = setTimeout(async () => {
+      try {
+        await spotifyPlayer.pause();
+        setStatus("Clip finished. Ready for the next goal!");
+      } catch (error) {
+        setStatus("Clip ended, but Spotify could not be paused.");
+      }
+    }, CLIP_SECONDS * 1000);
+
+  } catch (error) {
+    setStatus("Couldn't play song: " + error.message);
+  }
+}
+
+async function stopAll() {
+  clearTimeout(stopTimer);
+
+  if (spotifyPlayer) {
+    try {
+      await spotifyPlayer.pause();
+      setStatus("Playback stopped.");
+    } catch (error) {
+      setStatus("Couldn't stop playback. Check your Spotify connection.");
+    }
+  } else {
+    setStatus("Connect Spotify first.");
+  }
+}
+
+renderPlayers();
+exchangeAuthorizationCode();
+</script>
+</body>
+</html>
